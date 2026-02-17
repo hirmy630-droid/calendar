@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>カレンダー壁紙メーカー - iOS Optimized</title>
+    <!-- React & Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #09090b; margin: 0; overflow-x: hidden; user-select: none; -webkit-tap-highlight-color: transparent; touch-action: none; }
+        
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%;
+            background: #3b82f6; cursor: pointer; margin-top: -6px;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+        }
+        
+        input[type=range].slider-green::-webkit-slider-thumb {
+            background: #10b981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; cursor: pointer; background: #27272a; border-radius: 2px;
+        }
+        .font-helvetica { font-family: Helvetica, Arial, "Hiragino Kaku Gothic ProN", "ヒラギノ角ゴ ProN W3", sans-serif; }
+        .cursor-grab { cursor: grab; }
+        .cursor-grabbing { cursor: grabbing; }
+        .btn-interact:active { transform: scale(0.95); }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useCallback, useMemo } = React;
+        
+        const Icon = ({ name, size = 16, className = "" }) => {
+            const iconData = window.lucide ? window.lucide.icons[name] : null;
+            if (!iconData) return <span style={{ width: size, height: size, display: 'inline-block' }} />;
+            return (
+                <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${className} pointer-events-none`}>
+                    {iconData.map(([tag, attrs], index) => React.createElement(tag, { key: index, ...attrs }))}
+                </svg>
+            );
+        };
+
+        const SliderRow = ({ icon, label, value, min, max, step, onChange, onReset, displayValue, isGreen = false }) => {
+            const handleDecrement = () => {
+                const newValue = Math.max(min, value - step);
+                onChange(newValue);
+            };
+            const handleIncrement = () => {
+                const newValue = Math.min(max, value + step);
+                onChange(newValue);
+            };
+
+            return (
+                <div className="flex flex-col gap-1 py-0.5">
+                    <div className="flex items-center justify-between text-[12px] font-bold text-zinc-300 px-1">
+                        <div className="flex items-center gap-1.5">
+                            <Icon name={icon} size={12} />
+                            <span>{label}</span>
+                            <span className={`${isGreen ? 'text-emerald-400' : 'text-blue-400'} ml-1 font-mono`}>{displayValue || `${value}%`}</span>
+                        </div>
+                        <button onClick={onReset} className="text-[9px] text-zinc-500 hover:text-blue-400 uppercase tracking-tighter font-bold">Reset</button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={handleDecrement} className="w-7 h-7 flex items-center justify-center bg-zinc-800 rounded-lg text-white btn-interact border border-zinc-700/50 shadow-sm">
+                            <Icon name="Minus" size={13} />
+                        </button>
+                        <input 
+                            type="range" 
+                            min={min} 
+                            max={max} 
+                            step={step} 
+                            value={value} 
+                            onChange={(e) => onChange(parseFloat(e.target.value))} 
+                            className={`flex-1 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer ${isGreen ? 'slider-green' : ''}`} 
+                        />
+                        <button onClick={handleIncrement} className="w-7 h-7 flex items-center justify-center bg-zinc-800 rounded-lg text-white btn-interact border border-zinc-700/50 shadow-sm">
+                            <Icon name="Plus" size={13} />
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const CANVAS_WIDTH = 1125;
+            const CANVAS_HEIGHT = 2436;
+            const PREVIEW_OUTER_WIDTH = 300;
+            const BORDER_WIDTH = 8;
+            const PREVIEW_INNER_WIDTH = PREVIEW_OUTER_WIDTH - (BORDER_WIDTH * 2);
+            const RENDER_RATIO = CANVAS_WIDTH / PREVIEW_INNER_WIDTH;
+
+            const DEFAULT_ACCENT = '#ff007f';
+            const DEFAULT_SATURDAY = '#007aff';
+            const DEFAULT_V_POS = 50;
+            const DEFAULT_C_SCALE = 1.0;
+            const DEFAULT_F_SCALE = 1.0;
+            const DEFAULT_COL_PITCH = 121;
+            const DEFAULT_ROW_PITCH = 81;
+
+            const [year, setYear] = useState(new Date().getFullYear());
+            const [month, setMonth] = useState(new Date().getMonth() + 1);
+            const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
+            const [saturdayColor, setSaturdayColor] = useState(DEFAULT_SATURDAY);
+            const [bgImage, setBgImage] = useState(null); 
+            const [verticalPos, setVerticalPos] = useState(DEFAULT_V_POS); 
+            const [calendarScale, setCalendarScale] = useState(DEFAULT_C_SCALE); 
+            const [fontScale, setFontScale] = useState(DEFAULT_F_SCALE);
+            const [bgScale, setBgScale] = useState(1.0); 
+            const [bgOffset, setBgOffset] = useState({ x: 0, y: 0 });
+            const [colPitch, setColPitch] = useState(DEFAULT_COL_PITCH);
+            const [rowPitch, setRowPitch] = useState(DEFAULT_ROW_PITCH);
+            
+            const [showGrid, setShowGrid] = useState(false); 
+            const [history, setHistory] = useState([]);
+            const [showHistoryModal, setShowHistoryModal] = useState(false);
+            
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [isDragging, setIsDragging] = useState(false);
+            const [resultImage, setResultImage] = useState(null);
+
+            const canvasRef = useRef(null);
+            const fileInputRef = useRef(null);
+            const dragStartRef = useRef({ x: 0, y: 0 });
+            const previewRef = useRef(null);
+            
+            const initialDistRef = useRef(0);
+            const initialScaleRef = useRef(1.0);
+
+            const FONT_BASE_MONTH = 78; 
+            const FONT_BASE_WEEK = 44;
+            const FONT_BASE_DAY = 63;
+            const FONT_FAMILY = 'Helvetica, Arial, "Hiragino Kaku Gothic ProN", "ヒラギノ角ゴ ProN W3", sans-serif';
+
+            const previewFontSizeMonth = useMemo(() => (FONT_BASE_MONTH / RENDER_RATIO) * fontScale, [RENDER_RATIO, fontScale]);
+            const previewFontSizeWeek = useMemo(() => (FONT_BASE_WEEK / RENDER_RATIO) * fontScale, [RENDER_RATIO, fontScale]);
+            const previewFontSizeDay = useMemo(() => (FONT_BASE_DAY / RENDER_RATIO) * fontScale, [RENDER_RATIO, fontScale]);
+
+            const pxToPerc = (px) => (px / CANVAS_HEIGHT) * 100;
+            const MONTH_Y_OFFSET = pxToPerc(-111 * calendarScale);      
+            const LINE_Y_OFFSET = pxToPerc(47 * calendarScale); 
+            const DATES_START_Y_OFFSET = pxToPerc(104 * calendarScale); 
+            
+            const totalWidthBase = useMemo(() => colPitch * 7, [colPitch]);
+            const calendarWidthPerc = useMemo(() => ((totalWidthBase / CANVAS_WIDTH) * 100) * calendarScale, [calendarScale, totalWidthBase]);
+            const rowHeightYPerc = useMemo(() => pxToPerc(rowPitch * calendarScale), [rowPitch, calendarScale]);
+
+            const calendarData = useMemo(() => {
+                const firstDay = new Date(year, month - 1, 1).getDay();
+                const daysInMonth = new Date(year, month, 0).getDate();
+                const rows = [];
+                for (let i = 0; i < 6; i++) {
+                    const row = [];
+                    for (let j = 0; j < 7; j++) {
+                        const dayNum = i * 7 + j - firstDay + 1;
+                        row.push(dayNum >= 1 && dayNum <= daysInMonth ? dayNum : null);
+                    }
+                    rows.push(row);
+                }
+                return rows;
+            }, [year, month]);
+
+            const getJapaneseHoliday = useCallback((y, m, d) => {
+                const date = new Date(y, m - 1, d);
+                const dayOfWeek = date.getDay();
+                if (m === 1 && d === 1) return "元日";
+                if (m === 2 && d === 11) return "建国記念の日";
+                if (m === 2 && d === 23) return "天皇誕生日";
+                if (m === 4 && d === 29) return "昭和の日";
+                if (m === 5 && d === 3) return "憲法記念日";
+                if (m === 5 && d === 4) return "みどりの日";
+                if (m === 5 && d === 5) return "こどもの日";
+                if (m === 8 && d === 11) return "山の日";
+                if (m === 11 && d === 3) return "文化の日";
+                if (m === 11 && d === 23) return "勤労感謝の日";
+                if (m === 1 && Math.floor((d - 1) / 7) === 1 && dayOfWeek === 1) return "成人の日";
+                if (m === 7 && Math.floor((d - 1) / 7) === 2 && dayOfWeek === 1) return "海の日";
+                if (m === 9 && Math.floor((d - 1) / 7) === 2 && dayOfWeek === 1) return "敬老の日";
+                if (m === 10 && Math.floor((d - 1) / 7) === 1 && dayOfWeek === 1) return "スポーツの日";
+                if (m === 3 && d === Math.floor(20.8431 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4))) return "春分の日";
+                if (m === 9 && d === Math.floor(23.2488 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4))) return "秋分の日";
+                if (dayOfWeek === 1) {
+                    const yesterday = new Date(y, m - 1, d - 1);
+                    if (getJapaneseHoliday(y, m, d - 1) && yesterday.getDay() === 0) return "振替休日";
+                }
+                return null;
+            }, []);
+
+            const saveToHistory = useCallback((isAuto = false) => {
+                const snapshot = {
+                    id: Date.now(),
+                    timestamp: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                    isAuto,
+                    config: {
+                        year, month, accentColor, saturdayColor, verticalPos,
+                        calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage
+                    }
+                };
+                setHistory(prev => [snapshot, ...prev].slice(0, 20));
+            }, [year, month, accentColor, saturdayColor, verticalPos, calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage]);
+
+            const loadFromHistory = (snapshot) => {
+                const { config } = snapshot;
+                setYear(config.year);
+                setMonth(config.month);
+                setAccentColor(config.accentColor);
+                setSaturdayColor(config.saturdayColor);
+                setVerticalPos(config.verticalPos);
+                setCalendarScale(config.calendarScale);
+                setFontScale(config.fontScale);
+                setBgScale(config.bgScale);
+                setBgOffset(config.bgOffset);
+                setColPitch(config.colPitch);
+                setRowPitch(config.rowPitch);
+                setBgImage(config.bgImage);
+                setShowHistoryModal(false);
+            };
+
+            const resetCalendarSettings = () => {
+                setVerticalPos(DEFAULT_V_POS);
+                setCalendarScale(DEFAULT_C_SCALE);
+                setFontScale(DEFAULT_F_SCALE);
+                setColPitch(DEFAULT_COL_PITCH);
+                setRowPitch(DEFAULT_ROW_PITCH);
+                setAccentColor(DEFAULT_ACCENT);
+                setSaturdayColor(DEFAULT_SATURDAY);
+                setBgScale(1.0);
+                setBgOffset({ x: 0, y: 0 });
+            };
+
+            const resetBackground = () => {
+                setBgScale(1.0);
+                setBgOffset({ x: 0, y: 0 });
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => { setBgImage(event.target.result); setBgOffset({ x: 0, y: 0 }); setBgScale(1.0); };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const getCoords = (e) => {
+                if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                return { x: e.clientX, y: e.clientY };
+            };
+
+            const handleStart = (e) => {
+                if (!bgImage) return;
+                if (e.touches && e.touches.length === 2) {
+                    setIsDragging(false);
+                    const dist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    initialDistRef.current = dist;
+                    initialScaleRef.current = bgScale;
+                    return;
+                }
+                const { x, y } = getCoords(e);
+                setIsDragging(true);
+                dragStartRef.current = { x: x - bgOffset.x, y: y - bgOffset.y };
+            };
+
+            const handleMove = useCallback((e) => {
+                if (!bgImage) return;
+                if (e.touches && e.touches.length === 2) {
+                    if (initialDistRef.current > 0) {
+                        const currentDist = Math.hypot(
+                            e.touches[0].clientX - e.touches[1].clientX,
+                            e.touches[0].clientY - e.touches[1].clientY
+                        );
+                        const ratio = currentDist / initialDistRef.current;
+                        let newScale = initialScaleRef.current * ratio;
+                        newScale = Math.min(Math.max(newScale, 0.1), 5.0);
+                        setBgScale(newScale);
+                    }
+                    if (e.cancelable) e.preventDefault();
+                    return;
+                }
+                if (!isDragging) return;
+                const { x, y } = getCoords(e);
+                setBgOffset({ x: x - dragStartRef.current.x, y: y - dragStartRef.current.y });
+                if (e.cancelable) e.preventDefault();
+            }, [isDragging, bgImage, bgScale]);
+
+            const handleEnd = () => {
+                setIsDragging(false);
+                initialDistRef.current = 0;
+            };
+
+            const handleWheel = (e) => {
+                if (!bgImage) return;
+                e.preventDefault();
+                const delta = e.deltaY * -0.001;
+                let newScale = bgScale + delta;
+                newScale = Math.min(Math.max(newScale, 0.1), 5.0);
+                setBgScale(newScale);
+            };
+
+            useEffect(() => {
+                const previewEl = previewRef.current;
+                if (previewEl) {
+                    previewEl.addEventListener('wheel', handleWheel, { passive: false });
+                }
+                if (isDragging || initialDistRef.current > 0) {
+                    window.addEventListener('mousemove', handleMove, { passive: false });
+                    window.addEventListener('mouseup', handleEnd);
+                    window.addEventListener('touchmove', handleMove, { passive: false });
+                    window.addEventListener('touchend', handleEnd);
+                }
+                return () => {
+                    if (previewEl) previewEl.removeEventListener('wheel', handleWheel);
+                    window.removeEventListener('mousemove', handleMove);
+                    window.removeEventListener('mouseup', handleEnd);
+                    window.removeEventListener('touchmove', handleMove);
+                    window.removeEventListener('touchend', handleEnd);
+                };
+            }, [isDragging, handleMove, bgImage, bgScale]);
+
+            const generateWallpaper = async () => {
+                setIsGenerating(true);
+                saveToHistory(true);
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                canvas.width = CANVAS_WIDTH; canvas.height = CANVAS_HEIGHT;
+                
+                if (bgImage) {
+                    const img = new Image(); img.src = bgImage;
+                    await new Promise((resolve) => {
+                        img.onload = () => {
+                            const baseScale = Math.max(CANVAS_WIDTH / img.width, CANVAS_HEIGHT / img.height);
+                            const finalScale = baseScale * bgScale;
+                            const ratio = CANVAS_WIDTH / (previewRef.current.getBoundingClientRect().width - (BORDER_WIDTH * 2));
+                            const x = ((CANVAS_WIDTH - img.width * finalScale) / 2) + (bgOffset.x * ratio);
+                            const y = ((CANVAS_HEIGHT - img.height * finalScale) / 2) + (bgOffset.y * ratio);
+                            ctx.drawImage(img, x, y, img.width * finalScale, img.height * finalScale);
+                            resolve();
+                        };
+                    });
+                } else { ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); }
+                
+                const baseVertical = (verticalPos / 100) * CANVAS_HEIGHT;
+                const totalWidth = totalWidthBase * calendarScale; 
+                const startX = (CANVAS_WIDTH - totalWidth) / 2;
+                const finalColPitch = colPitch * calendarScale;
+                const finalRowPitch = rowPitch * calendarScale;
+                
+                ctx.textBaseline = 'middle';
+                ctx.textAlign = 'left';
+                ctx.font = `300 ${FONT_BASE_MONTH * calendarScale * fontScale}px ${FONT_FAMILY}`;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(`${month}月`, startX, baseVertical - (111 * calendarScale));
+                
+                ctx.textAlign = 'center';
+                ctx.font = `300 ${FONT_BASE_WEEK * calendarScale * fontScale}px ${FONT_FAMILY}`;
+                ['日', '月', '火', '水', '木', '金', '土'].forEach((wd, i) => {
+                    ctx.fillStyle = i === 0 ? accentColor : i === 6 ? saturdayColor : 'white';
+                    ctx.fillText(wd, startX + (i + 0.5) * finalColPitch, baseVertical);
+                });
+                
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)'; ctx.lineWidth = 1.5 * calendarScale;
+                ctx.beginPath(); 
+                ctx.moveTo(startX, baseVertical + (47 * calendarScale)); 
+                ctx.lineTo(startX + totalWidth, baseVertical + (47 * calendarScale)); 
+                ctx.stroke();
+                
+                ctx.font = `300 ${FONT_BASE_DAY * calendarScale * fontScale}px ${FONT_FAMILY}`;
+                calendarData.forEach((row, rIdx) => {
+                    row.forEach((day, cIdx) => {
+                        if (!day) return;
+                        const isHoliday = getJapaneseHoliday(year, month, day);
+                        ctx.fillStyle = (cIdx === 0 || isHoliday) ? accentColor : (cIdx === 6 ? saturdayColor : 'white');
+                        ctx.fillText(day.toString(), startX + (cIdx + 0.5) * finalColPitch, baseVertical + (104 * calendarScale) + rIdx * finalRowPitch);
+                    });
+                });
+                
+                canvas.toBlob(async (blob) => {
+                    if (!blob) return;
+                    const file = new File([blob], `wallpaper-${month}月.png`, { type: 'image/png' });
+                    const dataUrl = canvas.toDataURL('image/png');
+                    setResultImage(dataUrl);
+                    setIsGenerating(false);
+
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        try { await navigator.share({ files: [file], title: `${month}月のカレンダー壁紙` }); } catch (err) {}
+                    }
+                }, 'image/png');
+            };
+
+            const changeMonth = (delta) => {
+                let nM = month + delta; let nY = year;
+                if (nM < 1) { nM = 12; nY -= 1; } else if (nM > 12) { nM = 1; nY += 1; }
+                setMonth(nM); setYear(nY);
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 flex flex-col md:flex-row items-center md:items-start justify-center gap-8 lg:gap-12 pb-10 overflow-y-auto">
+                    {/* プレビューエリア */}
+                    <div ref={previewRef} onMouseDown={handleStart} onTouchStart={handleStart} className={`relative w-full max-w-[${PREVIEW_OUTER_WIDTH}px] aspect-[1125/2436] bg-black rounded-[48px] border-[${BORDER_WIDTH}px] border-zinc-800 shadow-[0_0_80px_rgba(0,0,0,1)] flex-shrink-0 overflow-hidden font-helvetica ${bgImage ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}>
+                        {bgImage ? (
+                            <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
+                                <img src={bgImage} className="absolute inset-0 w-full h-full object-cover transition-transform duration-75" style={{ transform: `translate(${bgOffset.x}px, ${bgOffset.y}px) scale(${bgScale})` }} />
+                            </div>
+                        ) : (
+                            <div className="absolute inset-0 bg-[#050505]"></div>
+                        )}
+                        
+                        <div className="absolute inset-0 pointer-events-none transition-all duration-300">
+                            <div className="absolute left-1/2 -translate-x-1/2 text-left text-white leading-none whitespace-nowrap" style={{ top: `${verticalPos + MONTH_Y_OFFSET}%`, transform: 'translate(-50%, -50%)', fontSize: `${previewFontSizeMonth * calendarScale}px`, width: `${calendarWidthPerc}%` }}>{month}月</div>
+                            <div className="absolute left-1/2 -translate-x-1/2" style={{ top: `${verticalPos}%`, transform: 'translate(-50%, -50%)', width: `${calendarWidthPerc}%` }}>
+                                <div className="grid grid-cols-7 text-center font-light leading-none" style={{ fontSize: `${previewFontSizeWeek * calendarScale}px` }}>
+                                    {['日', '月', '火', '水', '木', '金', '土'].map((wd, i) => <div key={wd} style={{ color: i === 0 ? accentColor : i === 6 ? saturdayColor : 'white' }}>{wd}</div>)}
+                                </div>
+                            </div>
+                            <div className="absolute left-1/2 -translate-x-1/2 h-[1px] bg-white/40" style={{ top: `${verticalPos + LINE_Y_OFFSET}%`, width: `${calendarWidthPerc}%` }}></div>
+                            <div className="absolute inset-0">
+                                {calendarData.map((row, rIdx) => (
+                                    <div key={rIdx} className="absolute left-1/2 -translate-x-1/2 grid grid-cols-7 font-light text-center leading-none" style={{ top: `${verticalPos + DATES_START_Y_OFFSET + (rIdx * rowHeightYPerc)}%`, transform: 'translate(-50%, -50%)', width: `${calendarWidthPerc}%`, fontSize: `${previewFontSizeDay * calendarScale}px` }}>
+                                        {row.map((day, cIdx) => {
+                                            if (!day) return <div key={cIdx} />;
+                                            const isHoliday = getJapaneseHoliday(year, month, day);
+                                            const color = (cIdx === 0 || isHoliday) ? accentColor : (cIdx === 6 ? saturdayColor : 'white');
+                                            return <div key={cIdx} style={{ color }}>{day}</div>;
+                                        })}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 指定グリッドライン (垂直中央線を追加) */}
+                        {showGrid && (
+                            <div className="absolute inset-0 pointer-events-none z-30">
+                                {/* 垂直中央線 */}
+                                <div className="absolute top-0 bottom-0 left-1/2 w-[1px] bg-purple-500/50 -translate-x-1/2" />
+                                {/* 指定水平ライン */}
+                                {[4.1, 8.6, 8.8].map((val) => {
+                                    const topPerc = val * 10;
+                                    return (
+                                        <div key={val} className="absolute w-full h-[1px] bg-purple-500/50" style={{ top: `${topPerc}%` }} />
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-6 bg-zinc-900 rounded-b-[20px] z-50"></div>
+                        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-24 h-1 bg-white/20 rounded-full z-50"></div>
+                    </div>
+
+                    {/* 設定パネル */}
+                    <div className="w-full max-w-[420px] lg:max-w-md space-y-3 bg-zinc-900/60 backdrop-blur-xl p-5 rounded-[2.5rem] border border-zinc-800 shadow-2xl self-start flex-shrink-0">
+                        {/* ヘッダーセクション */}
+                        <div className="flex flex-col gap-3 mb-3 px-1 text-zinc-300">
+                            <div className="flex items-center gap-2 text-white text-[18px] font-bold">
+                                <Icon name="Settings" size={22} className="text-zinc-300" />
+                                <span>壁紙エディタ</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <div className="flex gap-1.5">
+                                    <button 
+                                        onClick={resetCalendarSettings} 
+                                        className="text-[10px] bg-zinc-800 hover:bg-red-900/30 text-white font-bold px-3 py-1.5 rounded-xl border border-red-500 btn-interact flex items-center gap-1.5 transition-all"
+                                    >
+                                        <Icon name="RotateCcw" size={12} />初期化
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowGrid(!showGrid)} 
+                                        className={`text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 shadow-sm ${showGrid ? 'bg-blue-600 border-blue-400 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}
+                                    >
+                                        <Icon name="Grid" size={12} />
+                                        グリッド {showGrid ? 'ON' : 'OFF'}
+                                    </button>
+                                </div>
+                                <div className="flex gap-1.5">
+                                    <button onClick={() => saveToHistory(false)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-orange-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5 transition-colors">
+                                        <Icon name="Save" size={12} />保存
+                                    </button>
+                                    <button onClick={() => setShowHistoryModal(true)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-blue-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5">
+                                        <Icon name="History" size={12} />履歴
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* スライダー群 */}
+                        <div className="space-y-1 pt-1">
+                            <SliderRow 
+                                icon="MoveVertical" label="垂直位置" value={verticalPos} min={10} max={90} step={1} 
+                                onChange={setVerticalPos} onReset={() => setVerticalPos(DEFAULT_V_POS)} displayValue={`${verticalPos}%`}
+                                isGreen={true}
+                            />
+                            <SliderRow 
+                                icon="Maximize" label="全体縮尺" value={calendarScale} min={0.5} max={1.5} step={0.01} 
+                                onChange={setCalendarScale} onReset={() => setCalendarScale(DEFAULT_C_SCALE)} displayValue={`${Math.round(calendarScale * 100)}%`}
+                            />
+                            <SliderRow 
+                                icon="Type" label="文字サイズ" value={fontScale} min={0.5} max={2.0} step={0.01} 
+                                onChange={setFontScale} onReset={() => setFontScale(DEFAULT_F_SCALE)} displayValue={`${Math.round(fontScale * 100)}%`}
+                            />
+                            <SliderRow 
+                                icon="MoreHorizontal" label="列の間隔" value={colPitch} min={80} max={160} step={1} 
+                                onChange={setColPitch} onReset={() => setColPitch(DEFAULT_COL_PITCH)} displayValue={`${Math.round((colPitch / 121) * 100)}%`}
+                            />
+                            <SliderRow 
+                                icon="MoreVertical" label="行の間隔" value={rowPitch} min={40} max={120} step={1} 
+                                onChange={setRowPitch} onReset={() => setRowPitch(DEFAULT_ROW_PITCH)} displayValue={`${Math.round((rowPitch / 81) * 100)}%`}
+                            />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 mt-1.5 px-1 py-1">
+                            <label className="text-[13px] font-semibold text-zinc-300 whitespace-nowrap">表示月の選択</label>
+                            <div className="flex items-center justify-between bg-black/40 rounded-2xl p-0.5 border border-zinc-800 text-white w-full max-w-[200px]">
+                                <button onClick={() => changeMonth(-1)} className="p-1.5 hover:bg-zinc-800 rounded-xl transition-all btn-interact"><Icon name="ChevronLeft" size={18} /></button>
+                                <span className="font-bold text-[12px] tabular-nums">{year}年 {month}月</span>
+                                <button onClick={() => changeMonth(1)} className="p-1.5 hover:bg-zinc-800 rounded-xl transition-all btn-interact"><Icon name="ChevronRight" size={18} /></button>
+                            </div>
+                        </div>
+
+                        {/* 配色セクション */}
+                        <div className="flex items-center gap-2 px-1 py-1">
+                            <button 
+                                onClick={resetBackground} 
+                                className="bg-zinc-800 hover:bg-zinc-700 text-emerald-400 p-1.5 rounded-xl border border-zinc-700 flex items-center justify-center gap-1.5 px-3 h-8 transition-colors btn-interact shadow-sm"
+                                title="背景をリセット"
+                            >
+                                <Icon name="RefreshCcw" size={12} />
+                                <span className="text-[10px] font-bold whitespace-nowrap">背景リセット</span>
+                            </button>
+
+                            <div className="flex flex-col min-w-[32px]">
+                                <label className="text-[13px] font-semibold text-zinc-300">配色</label>
+                                <button onClick={() => {setAccentColor(DEFAULT_ACCENT); setSaturdayColor(DEFAULT_SATURDAY);}} className="text-[8px] text-zinc-500 hover:text-blue-400 uppercase font-bold tracking-tighter text-left leading-none">Reset</button>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-1 justify-end">
+                                <div className="bg-black/40 p-1.5 rounded-xl border border-zinc-800 flex items-center justify-center gap-1.5 px-2 text-zinc-400 font-bold shadow-inner h-8 flex-1 max-w-[70px]">
+                                    <span className="text-[9px] whitespace-nowrap">日祝</span>
+                                    <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="w-5 h-5 rounded bg-transparent cursor-pointer border-none" />
+                                </div>
+                                <div className="bg-black/40 p-1.5 rounded-xl border border-zinc-800 flex items-center justify-center gap-1.5 px-2 text-zinc-400 font-bold shadow-inner h-8 flex-1 max-w-[70px]">
+                                    <span className="text-[9px] whitespace-nowrap">土曜</span>
+                                    <input type="color" value={saturdayColor} onChange={(e) => setSaturdayColor(e.target.value)} className="w-5 h-5 rounded bg-transparent cursor-pointer border-none" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2 pt-1.5 pb-2 text-[11px] text-zinc-500 text-center italic leading-tight">
+                            ※背景画像はドラッグで移動、ピンチで拡大縮小できます
+                        </div>
+
+                        <div className="flex gap-2 pt-1.5 pb-2">
+                            <button onClick={() => fileInputRef.current.click()} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl flex items-center justify-center gap-2 text-zinc-300 transition-all btn-interact text-[13px] font-bold shadow-lg"><Icon name="ImagePlus" size={18} />背景読込</button>
+                            <button onClick={generateWallpaper} disabled={isGenerating} className="flex-1 bg-blue-600 text-white py-2 rounded-2xl font-bold text-[13px] hover:bg-blue-500 transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95"><Icon name="Download" size={18} />{isGenerating ? '作成中...' : '画像作成'}</button>
+                            <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+                        </div>
+                    </div>
+
+                    {/* 履歴モーダル */}
+                    {showHistoryModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 animate-fadeIn p-4 backdrop-blur-sm">
+                            <div className="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-[2.5rem] overflow-hidden flex flex-col shadow-2xl max-h-[70vh]">
+                                <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50 backdrop-blur-xl">
+                                    <h3 className="text-white font-bold flex items-center gap-2"><Icon name="History" className="text-blue-400" />設定の履歴</h3>
+                                    <button onClick={() => setShowHistoryModal(false)} className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400"><Icon name="X" /></button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                                    {history.length === 0 ? (
+                                        <div className="py-12 text-center text-zinc-500 text-sm font-medium">履歴がありません</div>
+                                    ) : (
+                                        history.map((item) => (
+                                            <button key={item.id} onClick={() => loadFromHistory(item)} className="w-full bg-zinc-800/50 hover:bg-blue-600/20 p-4 rounded-2xl border border-zinc-800 text-left transition-all group flex items-center justify-between">
+                                                <div>
+                                                    <div className="text-white font-bold text-[14px] flex items-center gap-1.5">
+                                                        {!item.isAuto && <Icon name="Star" size={14} className="fill-yellow-400 text-yellow-400" />}
+                                                        {item.config.month}月のカレンダー
+                                                    </div>
+                                                    <div className="text-zinc-500 text-[11px] flex items-center gap-1 group-hover:text-blue-300 mt-1">
+                                                        <Icon name="Clock" size={10} /> {item.timestamp} {item.isAuto && '(自動保存)'}
+                                                    </div>
+                                                </div>
+                                                <Icon name="ChevronRight" size={16} className="text-zinc-600 group-hover:text-blue-400" />
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                                <div className="p-4 bg-black/20 text-center text-[10px] text-zinc-500 italic">※履歴はページを閉じると消去されます</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* iOS保存用モーダル */}
+                    {resultImage && (
+                        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/95 animate-fadeIn p-4 overflow-y-auto">
+                            <div className="absolute top-4 right-4 z-[60]"><button onClick={() => setResultImage(null)} className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white backdrop-blur-md"><Icon name="X" size={24} /></button></div>
+                            <div className="w-full max-w-md text-center mb-4 space-y-2">
+                                <h3 className="text-white text-xl font-bold flex items-center justify-center gap-2"><Icon name="Smartphone" className="text-blue-400" /> iPhone・iPadの方</h3>
+                                <p className="text-zinc-300 text-sm bg-zinc-800/50 py-2 px-4 rounded-full inline-block">メニューから「<span className="text-blue-400 font-bold">画像を保存</span>」を選択！</p>
+                            </div>
+                            <div className="relative w-full max-w-[280px] aspect-[1125/2436] shadow-[0_0_50px_rgba(59,130,246,0.3)] rounded-2xl overflow-hidden mb-6 border border-white/20"><img src={resultImage} className="w-full h-full object-contain" alt="Wallpaper Result" /></div>
+                            <div className="flex gap-3 w-full max-w-xs">
+                                <button onClick={async () => {
+                                    const blob = await (await fetch(resultImage)).blob();
+                                    const file = new File([blob], `wallpaper-${month}月.png`, { type: 'image/png' });
+                                    if (navigator.share && navigator.canShare({ files: [file] })) { navigator.share({ files: [file] }); }
+                                    else { const link = document.createElement('a'); link.download = `wallpaper-${month}月.png`; link.href = resultImage; link.click(); }
+                                }} className="flex-1 bg-zinc-800 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 shadow-lg"><Icon name="Share" size={18} /> 保存メニューを開く</button>
+                                <button onClick={() => setResultImage(null)} className="flex-1 bg-white text-black py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-95 shadow-lg">閉じる</button>
+                            </div>
+                        </div>
+                    )}
+
+                    <canvas ref={canvasRef} className="hidden" />
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
