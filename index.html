@@ -165,7 +165,8 @@ const loadFromLocalStorage = () => {
             }, []);
 
             
-            const [showGrid, setShowGrid] = useState(false); 
+            // ★ グリッドのデフォルトを true に変更
+            const [showGrid, setShowGrid] = useState(true); 
             const [history, setHistory] = useState([]);
             const [showHistoryModal, setShowHistoryModal] = useState(false);
             
@@ -684,5 +685,14 @@ const changeMonth = (delta) => {
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js');
+  });
+}
+</script>
 </body>
+
 </html>
