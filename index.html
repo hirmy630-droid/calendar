@@ -444,6 +444,28 @@ lucide.createIcons({icons});\``);if(typeof d>"u")throw new Error("`createIcons()
         
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }
+
+        .phone-simple-app { width:100%; max-width:420px; margin:0 auto; padding:12px 16px calc(24px + env(safe-area-inset-bottom)); }
+        .phone-simple-header { padding-bottom:8px; }
+        .phone-simple-header h1 { font-size:18px; font-weight:700; }
+        .phone-simple-modes, .phone-simple-extra-modes { display:flex; gap:6px; }
+        .phone-simple-modes { margin-top:10px; }
+        .phone-simple-modes button, .phone-simple-extra-modes button { flex:1; min-height:44px; border-radius:10px; border:1px solid #3f3f46; background:#27272a; color:#d4d4d8; padding:8px 4px; font-size:14px; font-weight:700; }
+        .phone-simple-modes button[aria-pressed="true"], .phone-simple-extra-modes button[aria-pressed="true"] { background:#2563eb; border-color:#60a5fa; color:white; }
+        .phone-simple-help { font-size:14px; color:#d4d4d8; line-height:1.5; min-height:42px; margin:8px 0; }
+        .phone-simple-preview { width:300px; max-width:100%; margin:0 auto; }
+        .phone-simple-controls { font-size:14px; }
+        .phone-simple-controls button { min-width:44px; min-height:44px; font-size:14px; }
+        .phone-simple-controls label, .phone-simple-controls span { font-size:14px; }
+        .phone-simple-actions { margin-top:10px; }
+        .phone-simple-actions button { min-height:48px; }
+        .phone-simple-details { margin-top:12px; border:1px solid #3f3f46; border-radius:14px; padding:0 12px; background:#18181b; }
+        .phone-simple-details summary { min-height:48px; padding:14px 0; font-weight:700; cursor:pointer; }
+        .phone-simple-details input[type="range"] { min-width:0; min-height:28px; }
+        .phone-simple-details .phone-simple-extra-modes { margin-bottom:10px; }
+        .phone-simple-details > .flex.items-center.gap-2 { flex-wrap:wrap; }
+        .phone-simple-details > .flex.items-center.justify-between { flex-wrap:wrap; gap:8px; padding:12px 0; }
+        .phone-simple-details input[type="color"] { min-width:28px; min-height:28px; }
     </style>
     <link rel="manifest" href="./manifest.json">
 </head>
@@ -496,13 +518,13 @@ const loadFromLocalStorage = () => {
 
             return (
                 <div className="flex flex-col gap-1 py-0.5">
-                    <div className="flex items-center justify-between text-[12px] font-bold text-zinc-300 px-1">
+                    <div className="flex items-center justify-between text-[14px] font-bold text-zinc-300 px-1">
                         <div className="flex items-center gap-1.5">
                             <Icon name={icon} size={12} />
                             <span>{label}</span>
                             <span className={`${isGreen ? 'text-emerald-400' : 'text-blue-400'} ml-1 font-mono`}>{displayValue || `${value}%`}</span>
                         </div>
-                        <button onClick={onReset} className="text-[9px] text-zinc-500 hover:text-blue-400 uppercase tracking-tighter font-bold">Reset</button>
+                        <button onClick={onReset} className="text-[9px] text-zinc-500 hover:text-blue-400 uppercase tracking-tighter font-bold">戻す</button>
                     </div>
                     <div className="flex items-center gap-2">
                         <button onClick={handleDecrement} className="w-7 h-7 flex items-center justify-center bg-zinc-800 rounded-lg text-white btn-interact border border-zinc-700/50 shadow-sm">
@@ -909,18 +931,27 @@ const changeMonth = (delta) => {
             };
 
             return (
-                <div className="min-h-screen p-4 md:p-8 flex flex-col md:flex-row items-center md:items-start justify-center gap-8 lg:gap-12 pb-10 overflow-y-auto">
-                    {/* プレビューエリア */}
-                    <div className="w-full max-w-[300px] flex-shrink-0 space-y-3">
-                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 text-white">
-                            <div className="text-sm font-bold mb-2">指で調整する対象</div>
-                            <div className="flex flex-wrap gap-2" role="group" aria-label="指で調整する対象">
-                                {[['calendar', 'カレンダー'], ['text', '文字'], ['columns', '列間隔'], ['rows', '行間隔'], ['background', '背景']].map(([mode, label]) => (
-                                    <button key={mode} type="button" aria-pressed={gestureMode === mode} onClick={() => setGestureMode(mode)} className={`px-3 py-2 rounded-xl text-sm font-bold border ${gestureMode === mode ? 'bg-blue-600 border-blue-400 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-300'}`}>{label}</button>
-                                ))}
+                <main className="phone-simple-app text-white">
+                    <header className="phone-simple-header"><h1>カレンダー壁紙</h1></header>
+                    <section className="phone-simple-controls" aria-label="表示する年月">
+                        <div className="flex items-center justify-between gap-3 mt-1.5 px-1 py-1">
+                            <label className="text-[13px] font-semibold text-zinc-300 whitespace-nowrap">表示月の選択</label>
+                            <div className="flex items-center justify-between bg-black/40 rounded-2xl p-0.5 border border-zinc-800 text-white w-full max-w-[200px]">
+                                <button onClick={() => changeMonth(-1)} className="p-1.5 hover:bg-zinc-800 rounded-xl transition-all btn-interact"><Icon name="ChevronLeft" size={18} /></button>
+                                <span className="font-bold text-[12px] tabular-nums">{year}年 {month}月</span>
+                                <button onClick={() => changeMonth(1)} className="p-1.5 hover:bg-zinc-800 rounded-xl transition-all btn-interact"><Icon name="ChevronRight" size={18} /></button>
                             </div>
-                            <p className="text-sm text-zinc-300 mt-2 leading-relaxed" aria-live="polite">{gestureHelp[gestureMode]}</p>
                         </div>
+
+
+                    </section>
+                    <div className="phone-simple-modes" role="group" aria-label="指で調整する対象">
+                        {[['calendar', 'カレンダー'], ['background', '背景'], ['text', '文字']].map(([mode, label]) => (
+                            <button key={mode} type="button" aria-pressed={gestureMode === mode} onClick={() => setGestureMode(mode)}>{label}</button>
+                        ))}
+                    </div>
+                    <p className="phone-simple-help" aria-live="polite">{gestureHelp[gestureMode]}</p>
+                    <div className="phone-simple-preview">
                     <div ref={previewRef} aria-label="壁紙調整プレビュー" style={{ touchAction: 'none' }} className={`relative w-full max-w-[${PREVIEW_OUTER_WIDTH}px] aspect-[1125/2436] bg-black rounded-[48px] border-[${BORDER_WIDTH}px] border-zinc-800 shadow-[0_0_80px_rgba(0,0,0,1)] flex-shrink-0 overflow-hidden font-helvetica ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}>
                         {bgImage ? (
                             <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
@@ -972,42 +1003,20 @@ const changeMonth = (delta) => {
                     </div>
 
                     </div>
-
-                    {/* 設定パネル */}
-                    <div className="w-full max-w-[420px] lg:max-w-md space-y-3 bg-zinc-900/60 backdrop-blur-xl p-5 rounded-[2.5rem] border border-zinc-800 shadow-2xl self-start flex-shrink-0">
-                        {/* ヘッダーセクション */}
-                        <div className="flex flex-col gap-3 mb-3 px-1 text-zinc-300">
-                            <div className="flex items-center gap-2 text-white text-[18px] font-bold">
-                                <Icon name="Settings" size={22} className="text-zinc-300" />
-                                <span>壁紙エディタ</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                                <div className="flex gap-1.5">
-                                    <button 
-                                        onClick={resetCalendarSettings} 
-                                        className="text-[10px] bg-zinc-800 hover:bg-red-900/30 text-white font-bold px-3 py-1.5 rounded-xl border border-red-500 btn-interact flex items-center gap-1.5 transition-all"
-                                    >
-                                        <Icon name="RotateCcw" size={12} />初期化
-                                    </button>
-                                    <button 
-                                        onClick={() => setShowGrid(!showGrid)} 
-                                        className={`text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 shadow-sm ${showGrid ? 'bg-blue-600 border-blue-400 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}
-                                    >
-                                        <Icon name="Grid" size={12} />
-                                        グリッド {showGrid ? 'ON' : 'OFF'}
-                                    </button>
-                                </div>
-                                <div className="flex gap-1.5">
-                                    <button onClick={() => saveToHistory(false)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-orange-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5 transition-colors">
-                                        <Icon name="Save" size={12} />保存
-                                    </button>
-                                    <button onClick={() => setShowHistoryModal(true)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-blue-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5">
-                                        <Icon name="History" size={12} />履歴
-                                    </button>
-                                </div>
-                            </div>
+                    <div className="phone-simple-controls phone-simple-actions">
+                        <div className="flex gap-2 pt-1.5 pb-2">
+                            <button onClick={() => fileInputRef.current.click()} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl flex items-center justify-center gap-2 text-zinc-300 transition-all btn-interact text-[13px] font-bold shadow-lg"><Icon name="ImagePlus" size={18} />背景を選択</button>
+                            <button onClick={generateWallpaper} disabled={isGenerating} className="flex-1 bg-blue-600 text-white py-2 rounded-2xl font-bold text-[13px] hover:bg-blue-500 transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95"><Icon name="Download" size={18} />{isGenerating ? '作成中...' : '画像作成'}</button>
+                            <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
                         </div>
-
+                    </div>
+                    <details className="phone-simple-details phone-simple-controls">
+                        <summary>詳細設定</summary>
+                        <div className="phone-simple-extra-modes" role="group" aria-label="間隔の調整">
+                            {[['columns', '列の間隔'], ['rows', '行の間隔']].map(([mode, label]) => (
+                                <button key={mode} type="button" aria-pressed={gestureMode === mode} onClick={() => setGestureMode(mode)}>{label}を指で調整</button>
+                            ))}
+                        </div>
                         {/* スライダー群 */}
                         <div className="space-y-1 pt-1">
                             <SliderRow 
@@ -1033,15 +1042,6 @@ const changeMonth = (delta) => {
                             />
                         </div>
 
-                        <div className="flex items-center justify-between gap-3 mt-1.5 px-1 py-1">
-                            <label className="text-[13px] font-semibold text-zinc-300 whitespace-nowrap">表示月の選択</label>
-                            <div className="flex items-center justify-between bg-black/40 rounded-2xl p-0.5 border border-zinc-800 text-white w-full max-w-[200px]">
-                                <button onClick={() => changeMonth(-1)} className="p-1.5 hover:bg-zinc-800 rounded-xl transition-all btn-interact"><Icon name="ChevronLeft" size={18} /></button>
-                                <span className="font-bold text-[12px] tabular-nums">{year}年 {month}月</span>
-                                <button onClick={() => changeMonth(1)} className="p-1.5 hover:bg-zinc-800 rounded-xl transition-all btn-interact"><Icon name="ChevronRight" size={18} /></button>
-                            </div>
-                        </div>
-
                         {/* 配色セクション */}
                         <div className="flex items-center gap-2 px-1 py-1">
                             <button 
@@ -1055,7 +1055,7 @@ const changeMonth = (delta) => {
 
                             <div className="flex flex-col min-w-[32px]">
                                 <label className="text-[13px] font-semibold text-zinc-300">配色</label>
-                                <button onClick={() => {setAccentColor(DEFAULT_ACCENT); setSaturdayColor(DEFAULT_SATURDAY);}} className="text-[8px] text-zinc-500 hover:text-blue-400 uppercase font-bold tracking-tighter text-left leading-none">Reset</button>
+                                <button onClick={() => {setAccentColor(DEFAULT_ACCENT); setSaturdayColor(DEFAULT_SATURDAY);}} className="text-[8px] text-zinc-500 hover:text-blue-400 uppercase font-bold tracking-tighter text-left leading-none">戻す</button>
                             </div>
 
                             <div className="flex items-center gap-1.5 flex-1 justify-end">
@@ -1070,17 +1070,32 @@ const changeMonth = (delta) => {
                             </div>
                         </div>
 
-                        <div className="flex gap-2 pt-1.5 pb-2 text-[11px] text-zinc-500 text-center italic leading-tight">
-                            ※プレビュー上の対象を選んで指で調整できます。スライダーでも微調整できます。
-                        </div>
-
-                        <div className="flex gap-2 pt-1.5 pb-2">
-                            <button onClick={() => fileInputRef.current.click()} className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-2xl flex items-center justify-center gap-2 text-zinc-300 transition-all btn-interact text-[13px] font-bold shadow-lg"><Icon name="ImagePlus" size={18} />背景読込</button>
-                            <button onClick={generateWallpaper} disabled={isGenerating} className="flex-1 bg-blue-600 text-white py-2 rounded-2xl font-bold text-[13px] hover:bg-blue-500 transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95"><Icon name="Download" size={18} />{isGenerating ? '作成中...' : '画像作成'}</button>
-                            <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
-                        </div>
-                    </div>
-
+                            <div className="flex items-center justify-between">
+                                <div className="flex gap-1.5">
+                                    <button 
+                                        onClick={resetCalendarSettings} 
+                                        className="text-[10px] bg-zinc-800 hover:bg-red-900/30 text-white font-bold px-3 py-1.5 rounded-xl border border-red-500 btn-interact flex items-center gap-1.5 transition-all"
+                                    >
+                                        <Icon name="RotateCcw" size={12} />初期化
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowGrid(!showGrid)} 
+                                        className={`text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all flex items-center gap-1.5 shadow-sm ${showGrid ? 'bg-blue-600 border-blue-400 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}
+                                    >
+                                        <Icon name="Grid" size={12} />
+                                        グリッド {showGrid ? 'ON' : 'OFF'}
+                                    </button>
+                                </div>
+                                <div className="flex gap-1.5">
+                                    <button onClick={() => saveToHistory(false)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-orange-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5 transition-colors">
+                                        <Icon name="Save" size={12} />設定を一時保存
+                                    </button>
+                                    <button onClick={() => setShowHistoryModal(true)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-blue-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5">
+                                        <Icon name="History" size={12} />履歴
+                                    </button>
+                                </div>
+                            </div>
+                    </details>
                     {/* 履歴モーダル */}
                     {showHistoryModal && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 animate-fadeIn p-4 backdrop-blur-sm">
@@ -1140,7 +1155,7 @@ const changeMonth = (delta) => {
                     )}
 
                     <canvas ref={canvasRef} className="hidden" />
-                </div>
+                </main>
             );
         };
 
