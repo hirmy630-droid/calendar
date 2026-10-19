@@ -1,7 +1,8 @@
 const APP_BASE = new URL('./', self.location.href);
 const INDEX_URL = new URL('index.html', APP_BASE).href;
+const MANIFEST_URL = new URL('manifest.json', APP_BASE).href;
 const CACHE_PREFIX = 'calendar-wallpaper:' + APP_BASE.pathname + ':';
-const CACHE_NAME = CACHE_PREFIX + '20261019-0122';
+const CACHE_NAME = CACHE_PREFIX + '20261019-offline-1';
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -9,6 +10,9 @@ self.addEventListener('install', event => {
     if (!response.ok || response.redirected) throw new Error('index.html unavailable');
     const cache = await caches.open(CACHE_NAME);
     await cache.put(INDEX_URL, response);
+    const manifest = await fetch(MANIFEST_URL, { cache: 'reload' });
+    if (!manifest.ok || manifest.redirected) throw new Error('manifest.json unavailable');
+    await cache.put(MANIFEST_URL, manifest);
     await self.skipWaiting();
   })());
 });
@@ -34,6 +38,13 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const request = event.request;
+  if (request.method === 'GET' && request.url === MANIFEST_URL) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      return (await cache.match(MANIFEST_URL)) || fetch(request);
+    })());
+    return;
+  }
   if (request.method !== 'GET' || request.mode !== 'navigate') return;
   const url = new URL(request.url);
   if (url.origin !== APP_BASE.origin ||
