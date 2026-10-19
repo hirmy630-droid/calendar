@@ -524,12 +524,16 @@ const openHistoryDatabase = () => {
     }
     return historyDatabasePromise;
 };
+const retainCalendarHistory = (entries) => {
+    const automatic = new Set(entries.filter(item => item.isAuto).slice(0, 5));
+    return entries.filter(item => !item.isAuto || automatic.has(item));
+};
 const readSavedHistory = async () => {
     const db = await openHistoryDatabase();
     return new Promise((resolve, reject) => {
         const transaction = db.transaction('history', 'readonly');
         const request = transaction.objectStore('history').get('entries');
-        transaction.oncomplete = () => resolve(Array.isArray(request.result) ? request.result.filter(item => item && item.config).slice(0, 20) : []);
+        transaction.oncomplete = () => resolve(Array.isArray(request.result) ? request.result.filter(item => item && item.config) : []);
         transaction.onabort = () => reject(transaction.error || new Error('History read failed'));
         transaction.onerror = () => reject(transaction.error || new Error('History read failed'));
     });
@@ -666,6 +670,13 @@ const loadHolidayData = () => {
             const [colPitch, setColPitch] = useState(DEFAULT_COL_PITCH);
             const [rowPitch, setRowPitch] = useState(DEFAULT_ROW_PITCH);
 
+            const [settingsLoaded, setSettingsLoaded] = useState(false);
+            const settingsReadyRef = useRef(false);
+            settingsReadyRef.current = settingsLoaded;
+            const exitSavedRef = useRef(false);
+            const settingsSnapshotRef = useRef(null);
+            settingsSnapshotRef.current = { year, month, accentColor, saturdayColor, verticalPos, calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage };
+
             // 初期ロード
             useEffect(() => {
                 const saved = loadFromLocalStorage();
@@ -683,20 +694,36 @@ const loadHolidayData = () => {
                     setRowPitch(saved.rowPitch ?? DEFAULT_ROW_PITCH);
                     setBgImage(saved.bgImage ?? null);
                 }
+                setSettingsLoaded(true);
             }, []);
 
             
             // ★ グリッドのデフォルトを true に変更
             const [showGrid, setShowGrid] = useState(true); 
             const [history, setHistory] = useState([]);
-            const [historyLoaded, setHistoryLoaded] = useState(false);
+            const historyRef = useRef([]);
+            const historyReadyRef = useRef(false);
+            const [showHistoryModal, setShowHistoryModal] = useState(false);
             const historyStorageWarningRef = useRef(false);
+            const commitHistory = (entries) => {
+                const retained = retainCalendarHistory(entries);
+                historyRef.current = retained;
+                setHistory(retained);
+                if (historyReadyRef.current) {
+                    writeSavedHistory(retained).catch(() => {
+                        if (!historyStorageWarningRef.current) {
+                            historyStorageWarningRef.current = true;
+                            alert('履歴を端末に保存できませんでした。空き容量やブラウザの保存制限を確認してください。保存できなかった履歴はページを閉じると消えます。');
+                        }
+                    });
+                }
+            };
             useEffect(() => {
                 let active = true;
                 readSavedHistory().then(saved => {
                     if (active) {
-                        setHistory(current => [...current, ...saved].slice(0, 20));
-                        setHistoryLoaded(true);
+                        historyReadyRef.current = true;
+                        commitHistory([...historyRef.current, ...saved]);
                     }
                 }).catch(() => {
                     if (active) {
@@ -706,16 +733,22 @@ const loadHolidayData = () => {
                 });
                 return () => { active = false; };
             }, []);
-            useEffect(() => {
-                if (!historyLoaded) return;
-                writeSavedHistory(history).catch(() => {
-                    if (!historyStorageWarningRef.current) {
-                        historyStorageWarningRef.current = true;
-                        alert('履歴を端末に保存できませんでした。空き容量やブラウザの保存制限を確認してください。保存できなかった履歴はページを閉じると消えます。');
-                    }
-                });
-            }, [history, historyLoaded]);
-            const [showHistoryModal, setShowHistoryModal] = useState(false);
+            const saveToHistory = (isAuto = false) => {
+                const snapshot = {
+                    id: globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+                    timestamp: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                    isAuto,
+                    config: { ...settingsSnapshotRef.current }
+                };
+                commitHistory([snapshot, ...historyRef.current]);
+                if (!isAuto) {
+                    pendingSettingsRef.current = { ...settingsSnapshotRef.current };
+                    flushPendingSettings();
+                }
+            };
+            const deleteFromHistory = (id) => {
+                commitHistory(historyRef.current.filter(item => item.id !== id));
+            };
             const [holidayData, setHolidayData] = useState(loadHolidayData);
             const [isImportingHolidays, setIsImportingHolidays] = useState(false);
             const holidayFileInputRef = useRef(null);
@@ -827,19 +860,6 @@ const loadHolidayData = () => {
                 }
                 return null;
             }, [holidayData]);
-
-            const saveToHistory = useCallback((isAuto = false) => {
-                const snapshot = {
-                    id: Date.now(),
-                    timestamp: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                    isAuto,
-                    config: {
-                        year, month, accentColor, saturdayColor, verticalPos,
-                        calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage
-                    }
-                };
-                setHistory(prev => [snapshot, ...prev].slice(0, 20));
-            }, [year, month, accentColor, saturdayColor, verticalPos, calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage]);
 
             const loadFromHistory = (snapshot) => {
                 const { config } = snapshot;
@@ -1001,7 +1021,6 @@ const loadHolidayData = () => {
                 generationInProgressRef.current = true;
                 setIsGenerating(true);
                 try {
-                saveToHistory(true);
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
                 canvas.width = CANVAS_WIDTH; canvas.height = CANVAS_HEIGHT;
@@ -1080,37 +1099,40 @@ const loadHolidayData = () => {
             };
 
             
-// 操作終了後にまとめて自動保存。画面を離れるときは未保存分を保存する。
+// 最新設定は画面を離れたとき、または「保存」を押したときに保存する。
 const pendingSettingsRef = useRef(null);
 const flushPendingSettings = useCallback(() => {
-    if (pendingSettingsRef.current) {
-        if (saveToLocalStorage(pendingSettingsRef.current)) {
-            pendingSettingsRef.current = null;
-        }
+    if (pendingSettingsRef.current && saveToLocalStorage(pendingSettingsRef.current)) {
+        pendingSettingsRef.current = null;
     }
 }, []);
 useEffect(() => {
-    pendingSettingsRef.current = {
-        year, month, accentColor, saturdayColor, verticalPos,
-        calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage
-    };
-    if (isDragging) return;
-    const timer = setTimeout(flushPendingSettings, 400);
-    return () => clearTimeout(timer);
-}, [year, month, accentColor, saturdayColor, verticalPos,
-    calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage,
-    isDragging, flushPendingSettings]);
+    if (!settingsLoaded) return;
+    pendingSettingsRef.current = { ...settingsSnapshotRef.current };
+}, [settingsLoaded, year, month, accentColor, saturdayColor, verticalPos,
+    calendarScale, fontScale, bgScale, bgOffset, colPitch, rowPitch, bgImage]);
 useEffect(() => {
-    const saveWhenHidden = () => {
-        if (document.visibilityState === 'hidden') flushPendingSettings();
+    const saveOnExit = () => {
+        if (!settingsReadyRef.current || exitSavedRef.current) return;
+        exitSavedRef.current = true;
+        pendingSettingsRef.current = { ...settingsSnapshotRef.current };
+        flushPendingSettings();
+        saveToHistory(true);
     };
-    window.addEventListener('pagehide', flushPendingSettings);
-    document.addEventListener('visibilitychange', saveWhenHidden);
+    const onVisibility = () => {
+        if (document.visibilityState === 'hidden') saveOnExit();
+        else exitSavedRef.current = false;
+    };
+    const onPageShow = () => { exitSavedRef.current = false; };
+    window.addEventListener('pagehide', saveOnExit);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
-        window.removeEventListener('pagehide', flushPendingSettings);
-        document.removeEventListener('visibilitychange', saveWhenHidden);
+        window.removeEventListener('pagehide', saveOnExit);
+        window.removeEventListener('pageshow', onPageShow);
+        document.removeEventListener('visibilitychange', onVisibility);
     };
-}, [flushPendingSettings]);
+}, []);
 
 const changeMonth = (delta) => {
 
@@ -1198,6 +1220,10 @@ const changeMonth = (delta) => {
                             <button onClick={generateWallpaper} disabled={isGenerating} className="flex-1 bg-blue-600 text-white py-2 rounded-2xl font-bold text-[13px] hover:bg-blue-500 transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95"><Icon name="Download" size={18} />{isGenerating ? '作成中...' : '画像作成'}</button>
                             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
                         </div>
+                        <div className="flex gap-2 pb-2">
+                            <button type="button" onClick={() => saveToHistory(false)} className="flex-1 py-2 text-[14px] bg-zinc-800 text-orange-400 font-bold rounded-xl border border-zinc-700 flex justify-center items-center gap-2"><Icon name="Save" size={16} />保存</button>
+                            <button type="button" onClick={() => setShowHistoryModal(true)} className="flex-1 py-2 text-[14px] bg-zinc-800 text-blue-400 font-bold rounded-xl border border-zinc-700 flex justify-center items-center gap-2"><Icon name="History" size={16} />履歴</button>
+                        </div>
                     </div>
                     <details className="phone-simple-details phone-simple-controls">
                         <summary>詳細設定</summary>
@@ -1275,14 +1301,6 @@ const changeMonth = (delta) => {
                                         グリッド {showGrid ? 'ON' : 'OFF'}
                                     </button>
                                 </div>
-                                <div className="flex gap-1.5">
-                                    <button onClick={() => saveToHistory(false)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-orange-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5 transition-colors">
-                                        <Icon name="Save" size={12} />設定を保存
-                                    </button>
-                                    <button onClick={() => setShowHistoryModal(true)} className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-blue-400 font-bold px-3 py-1.5 rounded-xl border border-zinc-700 btn-interact flex items-center gap-1.5">
-                                        <Icon name="History" size={12} />履歴
-                                    </button>
-                                </div>
                             </div>
                         <div className="mt-3 pt-3 border-t border-zinc-800 space-y-2" aria-label="休日データの更新">
                             <p className="text-[14px] font-bold text-zinc-200">休日データ</p>
@@ -1311,22 +1329,25 @@ const changeMonth = (delta) => {
                                         <div className="py-12 text-center text-zinc-500 text-sm font-medium">履歴がありません</div>
                                     ) : (
                                         history.map((item) => (
-                                            <button key={item.id} onClick={() => loadFromHistory(item)} className="w-full bg-zinc-800/50 hover:bg-blue-600/20 p-4 rounded-2xl border border-zinc-800 text-left transition-all group flex items-center justify-between">
+                                            <div key={item.id} className="w-full bg-zinc-800/50 rounded-2xl border border-zinc-800 flex items-center gap-2">
+                                            <button type="button" onClick={() => loadFromHistory(item)} className="flex-1 min-w-0 p-4 text-left transition-all group flex items-center justify-between">
                                                 <div>
                                                     <div className="text-white font-bold text-[14px] flex items-center gap-1.5">
                                                         {!item.isAuto && <Icon name="Star" size={14} className="fill-yellow-400 text-yellow-400" />}
                                                         {item.config.month}月のカレンダー
                                                     </div>
                                                     <div className="text-zinc-500 text-[11px] flex items-center gap-1 group-hover:text-blue-300 mt-1">
-                                                        <Icon name="Clock" size={10} /> {item.timestamp} {item.isAuto && '(自動保存)'}
+                                                        <Icon name="Clock" size={10} /> {item.timestamp} {item.isAuto ? '（自動保存）' : '（手動保存・保持）'}
                                                     </div>
                                                 </div>
                                                 <Icon name="ChevronRight" size={16} className="text-zinc-600 group-hover:text-blue-400" />
                                             </button>
+                                            <button type="button" onClick={() => deleteFromHistory(item.id)} className="text-[14px] text-red-300 p-3" aria-label="この履歴を削除">削除</button>
+                                            </div>
                                         ))
                                     )}
                                 </div>
-                                <div className="p-4 bg-black/20 text-center text-[10px] text-zinc-500 italic">※履歴は背景画像と一緒にこの端末に最大20件保存されます</div>
+                                <div className="p-4 bg-black/20 text-center text-[10px] text-zinc-500 italic">自動保存は画面を離れたときの最新5件。手動保存は削除するまで保持します。</div>
                             </div>
                         </div>
                     )}
