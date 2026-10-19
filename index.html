@@ -588,8 +588,16 @@ const loadFromLocalStorage = () => {
             const dragStartRef = useRef({ x: 0, y: 0 });
             const previewRef = useRef(null);
             
-            const initialDistRef = useRef(0);
-            const initialScaleRef = useRef(1.0);
+            const [gestureMode, setGestureMode] = useState('calendar');
+            const gestureStateRef = useRef(null);
+            gestureStateRef.current = { gestureMode, bgImage, verticalPos, calendarScale, fontScale, colPitch, rowPitch, bgScale, bgOffset };
+            const gestureHelp = {
+                calendar: '1本指で上下移動・2本指のピンチで全体縮尺',
+                text: 'ピンチ、または1本指で上下に動かして文字サイズ',
+                columns: 'ピンチ、または1本指で左右に動かして列の間隔',
+                rows: 'ピンチ、または1本指で上下に動かして行の間隔',
+                background: bgImage ? '1本指で移動・2本指のピンチで背景の拡大縮小' : '「背景読込」で画像を選択してください'
+            };
 
             const FONT_BASE_MONTH = 78; 
             const FONT_BASE_WEEK = 44;
@@ -708,85 +716,98 @@ const loadFromLocalStorage = () => {
                 }
             };
 
-            const getCoords = (e) => {
-                if (e.touches && e.touches.length > 0) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-                return { x: e.clientX, y: e.clientY };
-            };
-
-            const handleStart = (e) => {
-                if (!bgImage) return;
-                if (e.touches && e.touches.length === 2) {
-                    setIsDragging(false);
-                    const dist = Math.hypot(
-                        e.touches[0].clientX - e.touches[1].clientX,
-                        e.touches[0].clientY - e.touches[1].clientY
-                    );
-                    initialDistRef.current = dist;
-                    initialScaleRef.current = bgScale;
-                    return;
-                }
-                const { x, y } = getCoords(e);
-                setIsDragging(true);
-                dragStartRef.current = { x: x - bgOffset.x, y: y - bgOffset.y };
-            };
-
-            const handleMove = useCallback((e) => {
-                if (!bgImage) return;
-                if (e.touches && e.touches.length === 2) {
-                    if (initialDistRef.current > 0) {
-                        const currentDist = Math.hypot(
-                            e.touches[0].clientX - e.touches[1].clientX,
-                            e.touches[0].clientY - e.touches[1].clientY
-                        );
-                        const ratio = currentDist / initialDistRef.current;
-                        let newScale = initialScaleRef.current * ratio;
-                        newScale = Math.min(Math.max(newScale, 0.1), 5.0);
-                        setBgScale(newScale);
+            // Gesture values feed the existing rendering and export settings.
+            useEffect(() => {
+                const el = previewRef.current;
+                const points = new Map();
+                let base = null;
+                const clamp = (value, min, max, step) =>
+                    Math.min(max, Math.max(min, Math.round(value / step) * step));
+                const measure = () => {
+                    const p = [...points.values()];
+                    if (p.length === 1) return { x: p[0].x, y: p[0].y, distance: 0 };
+                    return { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2,
+                        distance: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) };
+                };
+                const rebase = () => {
+                    base = points.size ? { ...gestureStateRef.current, ...measure(), count: points.size } : null;
+                };
+                const down = (e) => {
+                    if (e.pointerType === 'mouse' && e.button !== 0) return;
+                    const state = gestureStateRef.current;
+                    if (state.gestureMode === 'background' && !state.bgImage) return;
+                    if (points.size >= 2) return;
+                    points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                    el.setPointerCapture(e.pointerId);
+                    rebase();
+                    setIsDragging(true);
+                    if (e.cancelable) e.preventDefault();
+                };
+                const move = (e) => {
+                    if (!points.has(e.pointerId)) return;
+                    points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+                    if (!base || base.gestureMode !== gestureStateRef.current.gestureMode) rebase();
+                    const now = measure();
+                    const dx = now.x - base.x, dy = now.y - base.y;
+                    const ratio = base.distance > 0 ? now.distance / base.distance : 1;
+                    const pinching = base.count === 2;
+                    switch (base.gestureMode) {
+                        case 'calendar':
+                            setVerticalPos(clamp(base.verticalPos + dy / el.clientHeight * 100, 10, 90, 1));
+                            if (pinching) setCalendarScale(clamp(base.calendarScale * ratio, 0.5, 1.5, 0.01));
+                            break;
+                        case 'text':
+                            setFontScale(clamp(pinching ? base.fontScale * ratio : base.fontScale - dy / 150, 0.5, 2, 0.01));
+                            break;
+                        case 'columns':
+                            setColPitch(clamp(pinching ? base.colPitch * ratio : base.colPitch + dx / 3, 80, 160, 1));
+                            break;
+                        case 'rows':
+                            setRowPitch(clamp(pinching ? base.rowPitch * ratio : base.rowPitch + dy / 3, 40, 120, 1));
+                            break;
+                        case 'background':
+                            setBgOffset({ x: base.bgOffset.x + dx, y: base.bgOffset.y + dy });
+                            if (pinching) setBgScale(clamp(base.bgScale * ratio, 0.1, 5, 0.01));
+                            break;
                     }
                     if (e.cancelable) e.preventDefault();
-                    return;
-                }
-                if (!isDragging) return;
-                const { x, y } = getCoords(e);
-                setBgOffset({ x: x - dragStartRef.current.x, y: y - dragStartRef.current.y });
-                if (e.cancelable) e.preventDefault();
-            }, [isDragging, bgImage, bgScale]);
-
-            const handleEnd = () => {
-                setIsDragging(false);
-                initialDistRef.current = 0;
-            };
-
-            const handleWheel = (e) => {
-                if (!bgImage) return;
-                e.preventDefault();
-                const delta = e.deltaY * -0.001;
-                let newScale = bgScale + delta;
-                newScale = Math.min(Math.max(newScale, 0.1), 5.0);
-                setBgScale(newScale);
-            };
-
-            useEffect(() => {
-                const previewEl = previewRef.current;
-                if (previewEl) {
-                    previewEl.addEventListener('wheel', handleWheel, { passive: false });
-                }
-                if (isDragging || initialDistRef.current > 0 || bgImage) {
-                    window.addEventListener('mousemove', handleMove, { passive: false });
-                    window.addEventListener('mouseup', handleEnd);
-                    window.addEventListener('touchmove', handleMove, { passive: false });
-                    window.addEventListener('touchend', handleEnd);
-                    window.addEventListener('touchcancel', handleEnd);
-                }
-                return () => {
-                    if (previewEl) previewEl.removeEventListener('wheel', handleWheel);
-                    window.removeEventListener('mousemove', handleMove);
-                    window.removeEventListener('mouseup', handleEnd);
-                    window.removeEventListener('touchmove', handleMove);
-                    window.removeEventListener('touchend', handleEnd);
-                    window.removeEventListener('touchcancel', handleEnd);
                 };
-            }, [isDragging, handleMove, bgImage, bgScale]);
+                const end = (e) => {
+                    if (!points.delete(e.pointerId)) return;
+                    rebase();
+                    setIsDragging(points.size > 0);
+                };
+                const cancel = () => { points.clear(); base = null; setIsDragging(false); };
+                const wheel = (e) => {
+                    const state = gestureStateRef.current;
+                    if (state.gestureMode === 'background' && !state.bgImage) return;
+                    e.preventDefault();
+                    const delta = -e.deltaY * 0.001;
+                    switch (state.gestureMode) {
+                        case 'calendar': setCalendarScale(clamp(state.calendarScale + delta, 0.5, 1.5, 0.01)); break;
+                        case 'text': setFontScale(clamp(state.fontScale + delta, 0.5, 2, 0.01)); break;
+                        case 'columns': setColPitch(clamp(state.colPitch + delta * 80, 80, 160, 1)); break;
+                        case 'rows': setRowPitch(clamp(state.rowPitch + delta * 80, 40, 120, 1)); break;
+                        case 'background': setBgScale(clamp(state.bgScale + delta, 0.1, 5, 0.01)); break;
+                    }
+                };
+                el.addEventListener('pointerdown', down, { passive: false });
+                el.addEventListener('pointermove', move, { passive: false });
+                el.addEventListener('pointerup', end);
+                el.addEventListener('pointercancel', end);
+                el.addEventListener('lostpointercapture', end);
+                el.addEventListener('wheel', wheel, { passive: false });
+                window.addEventListener('blur', cancel);
+                return () => {
+                    el.removeEventListener('pointerdown', down);
+                    el.removeEventListener('pointermove', move);
+                    el.removeEventListener('pointerup', end);
+                    el.removeEventListener('pointercancel', end);
+                    el.removeEventListener('lostpointercapture', end);
+                    el.removeEventListener('wheel', wheel);
+                    window.removeEventListener('blur', cancel);
+                };
+            }, []);
 
             const generateWallpaper = async () => {
                 if (isGenerating) return;
@@ -890,7 +911,17 @@ const changeMonth = (delta) => {
             return (
                 <div className="min-h-screen p-4 md:p-8 flex flex-col md:flex-row items-center md:items-start justify-center gap-8 lg:gap-12 pb-10 overflow-y-auto">
                     {/* プレビューエリア */}
-                    <div ref={previewRef} style={{ touchAction: 'none' }} onMouseDown={handleStart} onTouchStart={handleStart} className={`relative w-full max-w-[${PREVIEW_OUTER_WIDTH}px] aspect-[1125/2436] bg-black rounded-[48px] border-[${BORDER_WIDTH}px] border-zinc-800 shadow-[0_0_80px_rgba(0,0,0,1)] flex-shrink-0 overflow-hidden font-helvetica ${bgImage ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}>
+                    <div className="w-full max-w-[300px] flex-shrink-0 space-y-3">
+                        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 text-white">
+                            <div className="text-sm font-bold mb-2">指で調整する対象</div>
+                            <div className="flex flex-wrap gap-2" role="group" aria-label="指で調整する対象">
+                                {[['calendar', 'カレンダー'], ['text', '文字'], ['columns', '列間隔'], ['rows', '行間隔'], ['background', '背景']].map(([mode, label]) => (
+                                    <button key={mode} type="button" aria-pressed={gestureMode === mode} onClick={() => setGestureMode(mode)} className={`px-3 py-2 rounded-xl text-sm font-bold border ${gestureMode === mode ? 'bg-blue-600 border-blue-400 text-white' : 'bg-zinc-800 border-zinc-700 text-zinc-300'}`}>{label}</button>
+                                ))}
+                            </div>
+                            <p className="text-sm text-zinc-300 mt-2 leading-relaxed" aria-live="polite">{gestureHelp[gestureMode]}</p>
+                        </div>
+                    <div ref={previewRef} aria-label="壁紙調整プレビュー" style={{ touchAction: 'none' }} className={`relative w-full max-w-[${PREVIEW_OUTER_WIDTH}px] aspect-[1125/2436] bg-black rounded-[48px] border-[${BORDER_WIDTH}px] border-zinc-800 shadow-[0_0_80px_rgba(0,0,0,1)] flex-shrink-0 overflow-hidden font-helvetica ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}>
                         {bgImage ? (
                             <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
                                 <img src={bgImage} className="absolute inset-0 w-full h-full object-cover transition-transform duration-75" style={{ transform: `translate(${bgOffset.x}px, ${bgOffset.y}px) scale(${bgScale})` }} />
@@ -938,6 +969,8 @@ const changeMonth = (delta) => {
 
                         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-6 bg-zinc-900 rounded-b-[20px] z-50"></div>
                         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-24 h-1 bg-white/20 rounded-full z-50"></div>
+                    </div>
+
                     </div>
 
                     {/* 設定パネル */}
@@ -1038,7 +1071,7 @@ const changeMonth = (delta) => {
                         </div>
 
                         <div className="flex gap-2 pt-1.5 pb-2 text-[11px] text-zinc-500 text-center italic leading-tight">
-                            ※背景画像はドラッグで移動、ピンチで拡大縮小できます
+                            ※プレビュー上の対象を選んで指で調整できます。スライダーでも微調整できます。
                         </div>
 
                         <div className="flex gap-2 pt-1.5 pb-2">

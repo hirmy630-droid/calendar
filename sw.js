@@ -1,64 +1,45 @@
-const APP_BASE = new URL('./', self.location.href);
-const INDEX_URL = new URL('index.html', APP_BASE).href;
-const MANIFEST_URL = new URL('manifest.json', APP_BASE).href;
-const CACHE_PREFIX = 'calendar-wallpaper:' + APP_BASE.pathname + ':';
-const CACHE_NAME = CACHE_PREFIX + '20261019-offline-1';
-
+/* Calendar wallpaper: isolated cache, network-first index. */
+'use strict';
+const BASE = new URL('./', self.registration.scope);
+const INDEX = new URL('index.html', BASE).href;
+const PREFIX = 'calendar-wallpaper:' + BASE.pathname + ':';
+const CACHE = PREFIX + '20261019-1119';
 self.addEventListener('install', event => {
-  event.waitUntil((async () => {
-    const response = await fetch(INDEX_URL, { cache: 'reload' });
-    if (!response.ok || response.redirected) throw new Error('index.html unavailable');
-    const cache = await caches.open(CACHE_NAME);
-    await cache.put(INDEX_URL, response);
-    const manifest = await fetch(MANIFEST_URL, { cache: 'reload' });
-    if (!manifest.ok || manifest.redirected) throw new Error('manifest.json unavailable');
-    await cache.put(MANIFEST_URL, manifest);
-    await self.skipWaiting();
-  })());
-});
-
-self.addEventListener('activate', event => {
-  event.waitUntil((async () => {
-    const names = await caches.keys();
-    await Promise.all(names.filter(name => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
-      .map(name => caches.delete(name)));
-    // Remove this app's entries only from the previous shared cache.
-    // Retain unrelated entries and never delete the entire legacy cache.
-    if (names.includes('calendar-pwa-v2')) {
-      const legacy = await caches.open('calendar-pwa-v2');
-      const entries = await legacy.keys();
-      await Promise.all(entries.filter(request => {
-        const url = new URL(request.url);
-        return url.origin === APP_BASE.origin && url.pathname.startsWith(APP_BASE.pathname);
-      }).map(request => legacy.delete(request)));
-    }
-    await self.clients.claim();
-  })());
-});
-
-self.addEventListener('fetch', event => {
-  const request = event.request;
-  if (request.method === 'GET' && request.url === MANIFEST_URL) {
-    event.respondWith((async () => {
-      const cache = await caches.open(CACHE_NAME);
-      return (await cache.match(MANIFEST_URL)) || fetch(request);
+    event.waitUntil((async () => {
+        const response = await fetch(INDEX, { cache: 'no-store' });
+        if (!response.ok) throw new Error('index fetch failed: ' + response.status);
+        const cache = await caches.open(CACHE);
+        await cache.put(INDEX, response);
+        await self.skipWaiting();
     })());
-    return;
-  }
-  if (request.method !== 'GET' || request.mode !== 'navigate') return;
-  const url = new URL(request.url);
-  if (url.origin !== APP_BASE.origin ||
-      (url.pathname !== APP_BASE.pathname && url.pathname !== new URL(INDEX_URL).pathname)) return;
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    try {
-      const response = await fetch(request, { cache: 'no-store' });
-      if (response.ok && !response.redirected) await cache.put(INDEX_URL, response.clone());
-      return response;
-    } catch (error) {
-      const cached = await cache.match(INDEX_URL);
-      if (cached) return cached;
-      throw error;
-    }
-  })());
+});
+self.addEventListener('activate', event => {
+    event.waitUntil((async () => {
+        const names = await caches.keys();
+        await Promise.all(names.filter(name => name.startsWith(PREFIX) && name !== CACHE).map(name => caches.delete(name)));
+        await self.clients.claim();
+    })());
+});
+self.addEventListener('fetch', event => {
+    const request = event.request;
+    const url = new URL(request.url);
+    if (request.method !== 'GET' || request.mode !== 'navigate' || url.origin !== BASE.origin) return;
+    if (url.pathname !== BASE.pathname && url.pathname !== new URL(INDEX).pathname) return;
+    event.respondWith((async () => {
+        try {
+            const response = await fetch(request, { cache: 'no-store' });
+            if (response.ok) {
+                try {
+                    const cache = await caches.open(CACHE);
+                    await cache.put(INDEX, response.clone());
+                } catch (_) {}
+            }
+            return response;
+        } catch (error) {
+            const cache = await caches.open(CACHE);
+            const saved = await cache.match(INDEX);
+            if (saved) return saved;
+            throw error;
+        }
+    })());
 });
